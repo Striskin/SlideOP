@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode, ButtonHTMLAttributes } from 'react';
 import { X } from 'lucide-react';
+import { createPortal } from 'react-dom';
 
 export function IconButton({
   label,
@@ -47,13 +48,20 @@ export function NumberField({
         max={max}
         step={step}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => {
-          const n = Number(draft);
-          if (draft !== '' && Number.isFinite(n)) onChange(Math.max(min, Math.min(max, n)));
-          else setDraft(String(value));
+        onBlur={(e) => {
+          const raw = e.currentTarget.value,
+            n = Number(raw);
+          const next = raw !== '' && Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : value;
+          setDraft(String(Math.round(next * 100) / 100));
+          if (next !== value) onChange(next);
         }}
         onKeyDown={(e) => {
           if (e.key === 'Enter') e.currentTarget.blur();
+          if (e.key === 'Escape') {
+            e.currentTarget.value = String(value);
+            setDraft(String(value));
+            e.currentTarget.blur();
+          }
         }}
       />
     </label>
@@ -75,10 +83,11 @@ export function ColorField({
       <input
         aria-label={label}
         type="color"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => {
-          if (draft !== value) onChange(draft);
+        value={(/^#[\da-f]{6}$/i.test(draft) ? draft : value).toLowerCase()}
+        onChange={(e) => {
+          const next = e.currentTarget.value.toLowerCase();
+          setDraft(next);
+          if (next !== value.toLowerCase()) onChange(next);
         }}
       />
       <span>{label}</span>
@@ -87,9 +96,20 @@ export function ColorField({
         value={draft.toUpperCase()}
         maxLength={7}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => {
-          if (/^#[\da-f]{6}$/i.test(draft)) onChange(draft);
-          else setDraft(value);
+        onBlur={(e) => {
+          const next = e.currentTarget.value.toLowerCase();
+          if (/^#[\da-f]{6}$/i.test(next)) {
+            setDraft(next);
+            if (next !== value) onChange(next);
+          } else setDraft(value);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.currentTarget.blur();
+          if (e.key === 'Escape') {
+            e.currentTarget.value = value;
+            setDraft(value);
+            e.currentTarget.blur();
+          }
         }}
       />
     </label>
@@ -140,7 +160,7 @@ export function Modal({
       before?.focus();
     };
   }, [onClose]);
-  return (
+  return createPortal(
     <div
       className="modal-backdrop"
       onMouseDown={(e) => {
@@ -163,6 +183,7 @@ export function Modal({
         </header>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

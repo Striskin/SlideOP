@@ -1,18 +1,51 @@
 import { useEffect } from 'react';
 import { useEditor } from '../store/editor';
-import { restoreProject, saveProject } from '../services/persistence';
-import { assetList } from '../services/assets';
-import { finishTextEditing } from '../canvas/commands';
+import { restoreProject, saveProject, deleteStoredUpload } from '../services/persistence';
+import { assetList, forgetAsset } from '../services/assets';
+import { captureEditingDocument, finishTextEditing } from '../canvas/commands';
+import { removeAssetElements, removeDocumentAsset } from '../model/assetRemoval';
 
 let writeQueue = Promise.resolve();
-export function persistCurrent() {
-  finishTextEditing();
-  const document = useEditor.getState().document;
+function purgeOpenAsset(assetId: string) {
+  const state = useEditor.getState(),
+    document = removeDocumentAsset(state.document, assetId);
+  state.set({
+    document,
+    past: state.past.map((s) => ({ ...s, document: removeDocumentAsset(s.document, assetId) })),
+    future: state.future.map((s) => ({ ...s, document: removeDocumentAsset(s.document, assetId) })),
+    clipboard: removeAssetElements(state.clipboard, assetId),
+    ...(document !== state.document
+      ? { scopePath: [], selection: [], saved: 'saving' as const }
+      : {}),
+  });
+  forgetAsset(assetId);
+}
+export async function deleteUpload(assetId: string) {
+  if (!(await persistCurrent()))
+    throw new Error('Could not save current work. The upload has been kept.');
+  const deletion = writeQueue.catch(() => {}).then(() => deleteStoredUpload(assetId));
+  writeQueue = deletion;
+  await deletion;
+  purgeOpenAsset(assetId);
+  if (typeof BroadcastChannel !== 'undefined') {
+    const channel = new BroadcastChannel('slideop-upload-deletions');
+    channel.postMessage({ type: 'deleted', assetId });
+    channel.close();
+  }
+}
+export function persistCurrent({ keepEditing = false }: { keepEditing?: boolean } = {}) {
+  if (!useEditor.getState().ready) return Promise.resolve(false);
+  if (!keepEditing) finishTextEditing();
+  const source = useEditor.getState().document,
+    revision = useEditor.getState().textRevision;
+  const document = keepEditing ? captureEditingDocument() : source;
   const assets = assetList();
   writeQueue = writeQueue.catch(() => {}).then(() => saveProject(document, assets));
   return writeQueue
     .then(() => {
-      if (useEditor.getState().document === document) useEditor.getState().set({ saved: 'saved' });
+      const state = useEditor.getState();
+      if (state.document === source && state.textRevision === revision)
+        state.set({ saved: 'saved' });
       return true;
     })
     .catch(() => {
@@ -25,7 +58,22 @@ export function persistCurrent() {
 }
 export function useProject() {
   const doc = useEditor((s) => s.document),
+    textRevision = useEditor((s) => s.textRevision),
     ready = useEditor((s) => s.ready);
+  useEffect(() => {
+    if (typeof BroadcastChannel === 'undefined') return;
+    const channel = new BroadcastChannel('slideop-upload-deletions');
+    channel.onmessage = (event: MessageEvent<unknown>) => {
+      const data = event.data as { type?: unknown; assetId?: unknown } | null;
+      if (
+        data?.type === 'deleted' &&
+        typeof data.assetId === 'string' &&
+        data.assetId.length <= 100
+      )
+        purgeOpenAsset(data.assetId);
+    };
+    return () => channel.close();
+  }, []);
   useEffect(() => {
     let cancelled = false;
     restoreProject()
@@ -48,12 +96,12 @@ export function useProject() {
   }, []);
   useEffect(() => {
     if (!ready) return;
-    const timer = setTimeout(() => void persistCurrent(), 700);
+    const timer = setTimeout(() => void persistCurrent({ keepEditing: true }), 700);
     return () => clearTimeout(timer);
-  }, [doc, ready]);
+  }, [doc, ready, textRevision]);
   useEffect(() => {
     const flush = () => {
-      if (document.visibilityState === 'hidden') void persistCurrent();
+      if (document.visibilityState === 'hidden') void persistCurrent({ keepEditing: true });
     };
     const leave = (e: BeforeUnloadEvent) => {
       if (useEditor.getState().saved !== 'saved') {

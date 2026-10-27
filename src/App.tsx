@@ -11,6 +11,7 @@ import { PageStrip } from './components/PageStrip';
 import { Dialogs } from './components/Dialogs';
 import type { DialogName } from './components/Dialogs';
 import { IconButton } from './components/ui';
+import { CropOverlay } from './components/CropDialog';
 
 export default function App() {
   useProject();
@@ -64,6 +65,7 @@ export default function App() {
         </div>
       </footer>
       <Dialogs name={dialog} onClose={close} />
+      <CropOverlay />
       {toast && (
         <div className="toast" role="status">
           <Check size={17} />

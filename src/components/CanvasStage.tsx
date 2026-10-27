@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { ActiveSelection, Canvas, Textbox } from 'fabric';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { ActiveSelection, Canvas, Textbox, Group } from 'fabric';
 import {
   MousePointer2,
   Hand,
@@ -14,14 +14,21 @@ import {
   Copy,
   Trash2,
   Group as GroupIcon,
+  Crop,
 } from 'lucide-react';
 import { useEditor, currentPage } from '../store/editor';
 import { objectId, toFabric, setLiveCanvas } from '../canvas/adapter';
+import type { DesignObject } from '../canvas/adapter';
 import { commitCanvas, finishTextEditing, groupSelection } from '../canvas/commands';
 import { IconButton } from './ui';
+import { useEditingPage } from '../hooks/useEditingPage';
+import { CanvasGuide } from './CanvasGuide';
+import { canCrop } from '../model/crop';
 
 export function CanvasStage() {
-  const page = useEditor((s) => s.document.pages.find((p) => p.id === s.pageId)!);
+  const page = useEditingPage();
+  const scopePath = useEditor((s) => s.scopePath),
+    gridSnap = useEditor((s) => s.gridSnap);
   const zoom = useEditor((s) => s.zoom),
     tool = useEditor((s) => s.tool),
     grid = useEditor((s) => s.grid),
@@ -29,20 +36,25 @@ export function CanvasStage() {
     showGuides = useEditor((s) => s.showGuides);
   const selection = useEditor((s) => s.selection),
     ready = useEditor((s) => s.ready);
+  const hasClipboard = useEditor((s) => s.clipboard.length > 0);
+  const selected = page.elements.filter((e) => selection.includes(e.id));
   const canvasElement = useRef<HTMLCanvasElement>(null),
     canvasRef = useRef<Canvas | null>(null),
     viewport = useRef<HTMLDivElement>(null);
   const [loaded, setLoaded] = useState(false),
     [context, setContext] = useState<{ x: number; y: number } | null>(null);
   const [snapLines, setSnapLines] = useState<{ x?: number; y?: number }>({});
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const panRef = useRef(pan);
+  panRef.current = pan;
   const syncing = useRef(false),
     version = useRef(0),
     fitRef = useRef(() => {});
   useEffect(() => {
     const canvas = new Canvas(canvasElement.current!, {
       preserveObjectStacking: true,
-      selectionColor: 'rgba(132,98,223,.08)',
-      selectionBorderColor: '#8462df',
+      selectionColor: 'rgba(212,107,45,.10)',
+      selectionBorderColor: '#d46b2d',
       selectionLineWidth: 1,
       stopContextMenu: true,
       fireRightClick: true,
@@ -65,13 +77,42 @@ export function CanvasStage() {
     canvas.on('text:editing:exited', () => {
       if (!syncing.current) commitCanvas();
     });
-    canvas.on('text:changed', () => useEditor.getState().set({ saved: 'saving' }));
+    canvas.on('text:changed', () => {
+      const state = useEditor.getState();
+      state.set({ saved: 'saving', textRevision: state.textRevision + 1 });
+    });
+    canvas.on('mouse:dblclick', ({ target }) => {
+      if (target instanceof Group && !(target instanceof ActiveSelection))
+        useEditor.getState().enterGroup(objectId(target));
+    });
+    canvas.on('contextmenu', ({ e, target }) => {
+      if (!(e instanceof MouseEvent)) return;
+      finishTextEditing();
+      if (target instanceof ActiveSelection) {
+        /* Keep a multi-selection for its context actions. */
+      } else if (target?.selectable) {
+        if (!canvas.getActiveObjects().includes(target)) canvas.setActiveObject(target);
+      } else canvas.discardActiveObject();
+      canvas.requestRenderAll();
+      setContext({
+        x: Math.min(e.clientX, window.innerWidth - 220),
+        y: Math.min(e.clientY, window.innerHeight - 280),
+      });
+    });
     const finishOnOutsideClick = (event: PointerEvent) => {
       if (event.target instanceof Node && !canvas.wrapperEl.contains(event.target))
         finishTextEditing();
     };
     document.addEventListener('pointerdown', finishOnOutsideClick, true);
     canvas.on('object:moving', ({ target }) => {
+      if (useEditor.getState().gridSnap) {
+        target.set({
+          left: Math.round(target.left / 20) * 20,
+          top: Math.round(target.top / 20) * 20,
+        });
+        target.setCoords();
+        return;
+      }
       if (!useEditor.getState().snapping) return;
       const page = currentPage(),
         box = target.getBoundingRect(),
@@ -144,14 +185,35 @@ export function CanvasStage() {
     if (!canvas || !loaded || !ready) return;
     const token = ++version.current;
     syncing.current = true;
-    Promise.all(page.elements.map((e) => toFabric(e)))
-      .then((objects) => {
+    canvas.discardActiveObject();
+    const existing = new Map(
+      canvas.getObjects().map((object) => [objectId(object), object as DesignObject]),
+    );
+    const created: DesignObject[] = [];
+    Promise.allSettled(
+      page.elements.map(async (e) => {
+        const old = existing.get(e.id);
+        if (old?.sourceElement === e) return old;
+        const object = await toFabric(e);
+        created.push(object);
+        return object;
+      }),
+    )
+      .then((results) => {
+        const objects = results.map((result) => {
+          if (result.status === 'rejected') throw result.reason;
+          return result.value;
+        });
         if (token !== version.current) {
-          objects.forEach((o) => o.dispose());
+          created.forEach((o) => o.dispose());
           return;
         }
         canvas.discardActiveObject();
         canvas.clear();
+        const retained = new Set(objects);
+        existing.forEach((object) => {
+          if (!retained.has(object)) object.dispose();
+        });
         canvas.backgroundColor = page.background;
         canvas.add(...objects);
         const ids = useEditor.getState().selection,
@@ -166,6 +228,7 @@ export function CanvasStage() {
         syncing.current = false;
       })
       .catch(() => {
+        created.forEach((o) => o.dispose());
         if (token === version.current) {
           syncing.current = false;
           useEditor.getState().set({
@@ -211,6 +274,7 @@ export function CanvasStage() {
     canvas.defaultCursor = tool === 'hand' ? 'grab' : 'default';
   }, [tool, loaded]);
   fitRef.current = () => {
+    if (panRef.current.x || panRef.current.y) setPan({ x: 0, y: 0 });
     const el = viewport.current;
     if (el)
       useEditor.getState().set({
@@ -231,17 +295,16 @@ export function CanvasStage() {
   useEffect(() => {
     const el = viewport.current;
     if (!el) return;
-    let start: { x: number; y: number; left: number; top: number } | null = null;
+    let start: { x: number; y: number; panX: number; panY: number } | null = null;
     const down = (e: PointerEvent) => {
       if (useEditor.getState().tool !== 'hand') return;
-      start = { x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop };
+      start = { x: e.clientX, y: e.clientY, panX: panRef.current.x, panY: panRef.current.y };
       el.setPointerCapture(e.pointerId);
       e.preventDefault();
     };
     const move = (e: PointerEvent) => {
       if (start) {
-        el.scrollLeft = start.left - e.clientX + start.x;
-        el.scrollTop = start.top - e.clientY + start.y;
+        setPan({ x: start.panX + e.clientX - start.x, y: start.panY + e.clientY - start.y });
       }
     };
     const up = () => {
@@ -258,6 +321,28 @@ export function CanvasStage() {
       el.removeEventListener('pointercancel', up);
     };
   }, []);
+  useLayoutEffect(() => {
+    canvasRef.current?.calcOffset();
+  }, [pan]);
+  useEffect(() => {
+    if (!context) return;
+    const dismiss = (event: PointerEvent) => {
+      if (event.target instanceof Element && !event.target.closest('.context-menu'))
+        setContext(null);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        setContext(null);
+      }
+    };
+    document.addEventListener('pointerdown', dismiss);
+    document.addEventListener('keydown', escape, true);
+    return () => {
+      document.removeEventListener('pointerdown', dismiss);
+      document.removeEventListener('keydown', escape, true);
+    };
+  }, [context]);
   return (
     <main
       className="stage-area"
@@ -266,6 +351,16 @@ export function CanvasStage() {
     >
       <div className="workspace-toolbar">
         <div className="toolbar-group">
+          <IconButton
+            label="Snap to grid"
+            aria-pressed={gridSnap}
+            className={gridSnap ? 'active-subtle' : ''}
+            onClick={() =>
+              useEditor.getState().set({ gridSnap: !gridSnap, grid: gridSnap ? grid : true })
+            }
+          >
+            <Grid2X2 size={17} />
+          </IconButton>
           <IconButton
             label="Toggle left panel"
             onClick={() => useEditor.getState().set({ leftOpen: !useEditor.getState().leftOpen })}
@@ -326,18 +421,36 @@ export function CanvasStage() {
           </IconButton>
         </div>
       </div>
+      {scopePath.length > 0 && (
+        <div className="group-breadcrumb" role="navigation" aria-label="Group editing">
+          <button onClick={() => useEditor.getState().set({ scopePath: [], selection: [] })}>
+            Back to page
+          </button>
+          <span>/ {page.name}</span>
+          <span className="muted">Editing group contents</span>
+          <button onClick={() => useEditor.getState().exitGroup()}>Exit group</button>
+        </div>
+      )}
       <div className={`canvas-viewport ${tool === 'hand' ? 'panning' : ''}`} ref={viewport}>
         <div className="canvas-center">
           <div
             className="artboard-wrap"
-            style={{ width: page.width * zoom, height: page.height * zoom }}
+            style={{
+              width: page.width * zoom,
+              height: page.height * zoom,
+              transform: `translate(${pan.x}px, ${pan.y}px)`,
+            }}
           >
-            {showGuides && (
+            {showGuides && !scopePath.length && (
               <>
                 <div
                   className="ruler horizontal"
                   title="Click to add a vertical guide"
                   onClick={(e) => {
+                    if (page.guides.length >= 100) {
+                      useEditor.getState().set({ toast: 'A page can contain up to 100 guides.' });
+                      return;
+                    }
                     const r = e.currentTarget.getBoundingClientRect();
                     useEditor.getState().updatePage({
                       guides: [
@@ -357,6 +470,10 @@ export function CanvasStage() {
                   className="ruler vertical"
                   title="Click to add a horizontal guide"
                   onClick={(e) => {
+                    if (page.guides.length >= 100) {
+                      useEditor.getState().set({ toast: 'A page can contain up to 100 guides.' });
+                      return;
+                    }
                     const r = e.currentTarget.getBoundingClientRect();
                     useEditor.getState().updatePage({
                       guides: [
@@ -374,16 +491,7 @@ export function CanvasStage() {
                 </div>
               </>
             )}
-            <div
-              className="artboard"
-              onContextMenu={(e) => {
-                e.preventDefault();
-                setContext({
-                  x: Math.min(e.clientX, window.innerWidth - 220),
-                  y: Math.min(e.clientY, window.innerHeight - 230),
-                });
-              }}
-            >
+            <div className="artboard">
               <canvas ref={canvasElement} />
             </div>
             {grid && (
@@ -393,19 +501,8 @@ export function CanvasStage() {
               />
             )}
             {showGuides &&
-              page.guides.map((g, i) => (
-                <div
-                  key={i}
-                  className={`guide ${g.axis === 'x' ? 'vertical' : 'horizontal'}`}
-                  style={g.axis === 'x' ? { left: g.position * zoom } : { top: g.position * zoom }}
-                  title="Double-click to remove guide"
-                  onDoubleClick={() =>
-                    useEditor
-                      .getState()
-                      .updatePage({ guides: page.guides.filter((_, j) => i !== j) })
-                  }
-                />
-              ))}
+              !scopePath.length &&
+              page.guides.map((g, i) => <CanvasGuide key={i} guide={g} index={i} zoom={zoom} />)}
             {snapLines.x !== undefined && (
               <div className="snap-line vertical" style={{ left: snapLines.x * zoom }} />
             )}
@@ -444,21 +541,35 @@ export function CanvasStage() {
       </div>
       {context && (
         <div role="menu" className="context-menu" style={{ left: context.x, top: context.y }}>
-          <button onClick={() => useEditor.getState().copy()}>
+          <button disabled={!selection.length} onClick={() => useEditor.getState().copy()}>
             <Copy size={16} />
             Copy<span>Ctrl C</span>
           </button>
-          <button onClick={() => useEditor.getState().paste()}>
+          <button disabled={!hasClipboard} onClick={() => useEditor.getState().paste()}>
             Paste<span>Ctrl V</span>
           </button>
-          <button onClick={() => useEditor.getState().duplicate()}>
+          <button disabled={!selection.length} onClick={() => useEditor.getState().duplicate()}>
             Duplicate<span>Ctrl D</span>
           </button>
-          <button onClick={groupSelection}>
+          <button
+            disabled={selected.length !== 1 || !canCrop(selected[0])}
+            onClick={() => useEditor.getState().set({ cropId: selected[0].id })}
+          >
+            <Crop size={16} />
+            Crop
+          </button>
+          <button
+            disabled={selected.length < 2 || selected.some((e) => e.locked)}
+            onClick={groupSelection}
+          >
             <GroupIcon size={16} />
             Group<span>Ctrl G</span>
           </button>
-          <button className="danger" onClick={() => useEditor.getState().remove()}>
+          <button
+            className="danger"
+            disabled={!selected.some((e) => !e.locked)}
+            onClick={() => useEditor.getState().remove()}
+          >
             <Trash2 size={16} />
             Delete<span>Del</span>
           </button>

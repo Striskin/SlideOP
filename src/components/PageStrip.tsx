@@ -1,10 +1,11 @@
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useState, useRef } from 'react';
 import { Plus, Copy, Trash2, ChevronLeft, ChevronRight, GalleryHorizontalEnd } from 'lucide-react';
 import type { Page } from '../model/document';
 import { useEditor } from '../store/editor';
 import { renderPage } from '../canvas/adapter';
 import { projectThumbnail } from '../services/persistence';
 import { IconButton } from './ui';
+import { queueThumbnail } from '../services/thumbnailQueue';
 
 export const PageThumbnail = memo(function PageThumbnail({
   page,
@@ -14,12 +15,25 @@ export const PageThumbnail = memo(function PageThumbnail({
   stored?: boolean;
 }) {
   const [image, setImage] = useState('');
+  const root = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
   useEffect(() => {
+    const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting), {
+      rootMargin: '200px',
+    });
+    if (root.current) observer.observe(root.current);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    if (!visible) return;
     let cancelled = false;
     const timer = setTimeout(() => {
-      void (stored ? projectThumbnail(page) : renderPage(page, 250))
+      void queueThumbnail(
+        () => (stored ? projectThumbnail(page) : renderPage(page, 250)),
+        () => cancelled,
+      )
         .then((url) => {
-          if (!cancelled) setImage(url);
+          if (!cancelled && url) setImage(url);
         })
         .catch(() => {});
     }, 150);
@@ -27,11 +41,15 @@ export const PageThumbnail = memo(function PageThumbnail({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [page, stored]);
-  return image ? (
-    <img src={image} alt={page.name} draggable={false} />
-  ) : (
-    <div style={{ background: page.background }} />
+  }, [page, stored, visible]);
+  return (
+    <div ref={root} className="thumbnail-image">
+      {image ? (
+        <img src={image} alt={page.name} draggable={false} />
+      ) : (
+        <div style={{ background: page.background }} />
+      )}
+    </div>
   );
 });
 export function PageStrip() {
@@ -72,7 +90,9 @@ export function PageStrip() {
               <button
                 className="page-thumb"
                 aria-label={`Open page ${index + 1}: ${page.name}`}
-                onClick={() => useEditor.getState().set({ pageId: page.id, selection: [] })}
+                onClick={() =>
+                  useEditor.getState().set({ pageId: page.id, selection: [], scopePath: [] })
+                }
               >
                 <PageThumbnail page={page} />
                 <span className="page-number">{String(index + 1).padStart(2, '0')}</span>

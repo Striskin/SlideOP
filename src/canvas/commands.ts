@@ -2,11 +2,28 @@ import { ActiveSelection, Group, Textbox } from 'fabric';
 import { liveCanvas, fromFabric, objectId } from './adapter';
 import type { DesignObject } from './adapter';
 import { currentPage, useEditor } from '../store/editor';
-import { makeElement } from '../model/document';
+import { makeElement, cloneElements } from '../model/document';
+import { produce } from 'immer';
+import { editScope } from '../model/scope';
 
 export function finishTextEditing() {
   const active = liveCanvas?.getActiveObject();
   if (active instanceof Textbox && active.isEditing) active.exitEditing();
+}
+
+export function captureEditingDocument() {
+  const state = useEditor.getState(),
+    canvas = liveCanvas;
+  const active = canvas?.getActiveObject();
+  if (!canvas || !(active instanceof Textbox) || !active.isEditing) return state.document;
+  const elements = canvas.getObjects().map((object) => fromFabric(object, true));
+  // Persist the draft without changing selection, undo history, or the live text object.
+  return produce(state.document, (draft) => {
+    editScope(draft, state.pageId, state.scopePath, (page) => {
+      page.elements = elements;
+    });
+    draft.updatedAt = new Date().toISOString();
+  });
 }
 
 export function commitCanvas() {
@@ -35,6 +52,12 @@ export function ungroupSelection() {
   if (!canvas) return;
   const group = canvas.getActiveObject();
   if (!(group instanceof Group) || group instanceof ActiveSelection) return;
+  if ((group as DesignObject).sourceElement?.clip) {
+    useEditor
+      .getState()
+      .set({ toast: 'Reset the group crop before ungrouping to preserve its appearance.' });
+    return;
+  }
   const elements = group.getObjects().map((o) => ({
     ...fromFabric(o, true),
     opacity: o.opacity * group.opacity,
@@ -110,4 +133,77 @@ export function alignSelection(
   commitCanvas();
   useEditor.getState().select(ids);
   canvas.requestRenderAll();
+}
+
+export function tidySelection(columns: number, gap: number) {
+  const canvas = liveCanvas;
+  if (!canvas) return;
+  const objects = canvas
+    .getActiveObjects()
+    .filter((o) => !(o as DesignObject).sourceElement?.locked);
+  if (objects.length < 2) return;
+  canvas.discardActiveObject();
+  objects.sort((a, b) => a.top - b.top || a.left - b.left);
+  const boxes = objects.map((o) => o.getBoundingRect());
+  const cols = Math.max(1, Math.min(objects.length, Math.floor(columns))),
+    rows = Math.ceil(objects.length / cols),
+    spacing = Math.max(0, Math.min(500, gap));
+  const widths = Array.from({ length: cols }, (_, col) =>
+    Math.max(...boxes.filter((_, i) => i % cols === col).map((b) => b.width)),
+  );
+  const heights = Array.from({ length: rows }, (_, row) =>
+    Math.max(...boxes.slice(row * cols, (row + 1) * cols).map((b) => b.height)),
+  );
+  const left = Math.min(...boxes.map((b) => b.left)),
+    top = Math.min(...boxes.map((b) => b.top));
+  objects.forEach((object, i) => {
+    const col = i % cols,
+      row = Math.floor(i / cols),
+      box = boxes[i];
+    object.left +=
+      left + widths.slice(0, col).reduce((sum, w) => sum + w, 0) + col * spacing - box.left;
+    object.top +=
+      top + heights.slice(0, row).reduce((sum, h) => sum + h, 0) + row * spacing - box.top;
+    object.setCoords();
+  });
+  commitCanvas();
+  useEditor.getState().select(objects.map(objectId));
+}
+
+export function repeatSelection(columns: number, rows: number, gap: number) {
+  const canvas = liveCanvas;
+  if (!canvas) return;
+  const objects = canvas
+    .getActiveObjects()
+    .filter((o) => !(o as DesignObject).sourceElement?.locked);
+  if (!objects.length) return;
+  canvas.discardActiveObject();
+  const boxes = objects.map((o) => o.getBoundingRect()),
+    left = Math.min(...boxes.map((b) => b.left)),
+    top = Math.min(...boxes.map((b) => b.top));
+  const width = Math.max(...boxes.map((b) => b.left + b.width)) - left,
+    height = Math.max(...boxes.map((b) => b.top + b.height)) - top;
+  const cols = Math.max(1, Math.min(10, Math.floor(columns))),
+    rowCount = Math.max(1, Math.min(10, Math.floor(rows))),
+    spacing = Math.max(0, Math.min(500, gap));
+  const base = objects.map((o) => fromFabric(o, true)),
+    page = currentPage();
+  if (page.elements.length + base.length * (cols * rowCount - 1) > 2000) {
+    useEditor.getState().set({ toast: 'Repeat would exceed the 2,000 objects per page limit.' });
+    return;
+  }
+  const copies = [];
+  for (let row = 0; row < rowCount; row++)
+    for (let col = 0; col < cols; col++) {
+      if (!row && !col) continue;
+      copies.push(
+        ...cloneElements(base, 0).map((e) => ({
+          ...e,
+          x: e.x + col * (width + spacing),
+          y: e.y + row * (height + spacing),
+        })),
+      );
+    }
+  useEditor.getState().replaceElements([...page.elements, ...copies]);
+  useEditor.getState().select([...base, ...copies].map((e) => e.id));
 }

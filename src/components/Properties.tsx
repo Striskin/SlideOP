@@ -26,33 +26,45 @@ import {
   WandSparkles,
   ArrowLeftRight,
   ArrowUpDown,
+  LoaderCircle,
+  Download,
 } from 'lucide-react';
 import { useEditor } from '../store/editor';
 import type { Element } from '../model/document';
 import { alignSelection, groupSelection, ungroupSelection } from '../canvas/commands';
 import { getAsset } from '../services/assets';
 import { removeImageBackground } from '../services/background';
+import type { BackgroundProgress } from '../services/background';
+import { download } from '../services/persistence';
 import { ColorField, IconButton, NumberField } from './ui';
+import { fontGroups } from '../model/fonts';
+import { canCrop } from '../model/crop';
+import { useEditingPage } from '../hooks/useEditingPage';
+import { StyleControls } from './StylesPanel';
+import { walkElements } from '../model/document';
 
 export function Properties({ onCheck }: { onCheck: () => void }) {
-  const page = useEditor((s) => s.document.pages.find((p) => p.id === s.pageId)!),
+  const page = useEditingPage(),
     selection = useEditor((s) => s.selection);
   const elements = page.elements.filter((e) => selection.includes(e.id)),
     element = elements.length === 1 ? elements[0] : null;
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<BackgroundProgress>({
+    label: 'Preparing the local model…',
+  });
   const update = (props: Partial<Element>) => useEditor.getState().update(selection, props);
   const removeBackground = async () => {
     if (!element?.assetId) return;
     const documentId = useEditor.getState().document.id;
-    const pageId = page.id;
+    const pageId = useEditor.getState().pageId;
     setBusy(true);
     try {
-      const a = await removeImageBackground(element.assetId, element.name);
+      const a = await removeImageBackground(element.assetId, element.name, setProgress);
       if (useEditor.getState().document.id !== documentId) return;
       useEditor.getState().commit((doc) => {
-        const target = doc.pages
-          .find((p) => p.id === pageId)
-          ?.elements.find((e) => e.id === element.id);
+        const target = walkElements(doc.pages.find((p) => p.id === pageId)?.elements ?? []).find(
+          (e) => e.id === element.id,
+        );
         if (target) target.assetId = a.id;
       });
       useEditor
@@ -134,7 +146,7 @@ export function Properties({ onCheck }: { onCheck: () => void }) {
                 </button>
               )}
               <p className="small muted">
-                Click a ruler to add a guide. Double-click a guide to remove it.
+                Click a ruler to add a guide. Drag to move it, or double-click to remove it.
               </p>
             </section>
             <div className="select-hint">
@@ -149,6 +161,34 @@ export function Properties({ onCheck }: { onCheck: () => void }) {
           </>
         ) : (
           <>
+            {element && canCrop(element) && (
+              <button
+                className="secondary full crop-selected-button"
+                aria-label={element.kind === 'image' ? 'Crop image visually' : 'Crop element'}
+                onClick={() => useEditor.getState().set({ cropId: element.id })}
+              >
+                <Crop size={16} />
+                {element.kind === 'image' ? 'Crop image' : 'Crop element'}
+              </button>
+            )}
+            {element?.clip && (
+              <button
+                className="text-button reset-element-crop"
+                onClick={() => update({ clip: undefined })}
+              >
+                Reset element crop
+              </button>
+            )}
+            {element && <StyleControls element={element} />}
+            {element?.kind === 'group' && (
+              <button
+                className="secondary full"
+                disabled={element.locked}
+                onClick={() => useEditor.getState().enterGroup(element.id)}
+              >
+                Edit group contents
+              </button>
+            )}
             <section>
               <div className="section-heading">
                 <h3>
@@ -269,12 +309,19 @@ export function Properties({ onCheck }: { onCheck: () => void }) {
                   value={element.fontFamily ?? 'Arial'}
                   onChange={(e) => update({ fontFamily: e.target.value as Element['fontFamily'] })}
                 >
-                  {['Arial', 'Georgia', 'Verdana', 'Courier New', 'Trebuchet MS', 'Impact'].map(
-                    (font) => (
-                      <option key={font}>{font}</option>
-                    ),
-                  )}
+                  {fontGroups.map((group) => (
+                    <optgroup key={group.name} label={group.name}>
+                      {group.fonts.map((font) => (
+                        <option key={font} value={font}>
+                          {font}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
                 </select>
+                <div className="font-inspector-preview" style={{ fontFamily: element.fontFamily }}>
+                  Aa Bb 123 <span>{element.fontFamily}</span>
+                </div>
                 <div className="field-grid">
                   <NumberField
                     label="Size"
@@ -357,13 +404,44 @@ export function Properties({ onCheck }: { onCheck: () => void }) {
               <section>
                 <h3>Image tools</h3>
                 <button
-                  className="secondary full"
+                  className="secondary full background-removal-button"
                   disabled={busy}
                   onClick={() => void removeBackground()}
                 >
-                  <WandSparkles size={16} />
+                  {busy ? <LoaderCircle size={16} className="spin" /> : <WandSparkles size={16} />}
                   {busy ? 'Processing locally…' : 'Remove background'}
                 </button>
+                {busy && (
+                  <div className="background-progress" role="status">
+                    <div>
+                      <LoaderCircle size={13} className="spin" />
+                      {progress.label}
+                      {progress.percent !== undefined ? ` · ${progress.percent}%` : ''}
+                    </div>
+                    {progress.percent !== undefined && (
+                      <progress
+                        max={100}
+                        value={progress.percent}
+                        aria-label="Model download progress"
+                      />
+                    )}
+                    <p>Your image stays on this device. You can keep working while it processes.</p>
+                  </div>
+                )}
+                {getAsset(element.assetId!)?.name.endsWith(' cutout') && (
+                  <button
+                    className="secondary full"
+                    style={{ marginTop: 8 }}
+                    onClick={() => {
+                      const asset = getAsset(element.assetId!);
+                      if (asset)
+                        download(asset.blob, `${element.name.replace(/\.[^.]+$/, '')}-cutout.png`);
+                    }}
+                  >
+                    <Download size={15} />
+                    Download cutout PNG
+                  </button>
+                )}
                 <p className="small muted">
                   Private, on-device AI. First use downloads the free model (about 40 MB). Requires
                   internet for this download. AGPL-3.0 library.
@@ -436,28 +514,34 @@ export function Properties({ onCheck }: { onCheck: () => void }) {
             {element && element.kind !== 'image' && element.kind !== 'group' && (
               <section>
                 <div className="section-heading">
-                  <h3>Fill</h3>
-                  <select
-                    className="mini-select"
-                    aria-label="Fill type"
-                    value={element.gradient ? 'gradient' : 'solid'}
-                    onChange={(e) =>
-                      update({
-                        gradient:
-                          e.target.value === 'gradient' ? { end: '#f4a46e', angle: 45 } : undefined,
-                      })
-                    }
-                  >
-                    <option value="solid">Solid</option>
-                    <option value="gradient">Gradient</option>
-                  </select>
+                  <h3>{element.kind === 'line' ? 'Line' : 'Fill'}</h3>
+                  {element.kind !== 'line' && (
+                    <select
+                      className="mini-select"
+                      aria-label="Fill type"
+                      value={element.gradient ? 'gradient' : 'solid'}
+                      onChange={(e) =>
+                        update({
+                          gradient:
+                            e.target.value === 'gradient'
+                              ? { end: '#f4a46e', angle: 45 }
+                              : undefined,
+                        })
+                      }
+                    >
+                      <option value="solid">Solid</option>
+                      <option value="gradient">Gradient</option>
+                    </select>
+                  )}
                 </div>
                 <ColorField
-                  label="Color"
-                  value={element.fill}
-                  onChange={(fill) => update({ fill })}
+                  label={element.kind === 'line' ? 'Line color' : 'Color'}
+                  value={element.kind === 'line' ? element.stroke : element.fill}
+                  onChange={(color) =>
+                    update(element.kind === 'line' ? { stroke: color } : { fill: color })
+                  }
                 />
-                {element.gradient && (
+                {element.gradient && element.kind !== 'line' && (
                   <>
                     <ColorField
                       label="End"
@@ -545,12 +629,21 @@ export function Properties({ onCheck }: { onCheck: () => void }) {
               <h3>Arrange</h3>
               <div className="two-buttons">
                 {elements.length > 1 ? (
-                  <button className="secondary" onClick={groupSelection}>
+                  <button
+                    className="secondary"
+                    disabled={elements.some((e) => e.locked)}
+                    onClick={groupSelection}
+                  >
                     <Group size={15} />
                     Group
                   </button>
                 ) : element?.kind === 'group' ? (
-                  <button className="secondary" onClick={ungroupSelection}>
+                  <button
+                    className="secondary"
+                    disabled={!!element.clip}
+                    title={element.clip ? 'Reset the group crop before ungrouping.' : undefined}
+                    onClick={ungroupSelection}
+                  >
                     <Ungroup size={15} />
                     Ungroup
                   </button>
@@ -610,7 +703,7 @@ export function Properties({ onCheck }: { onCheck: () => void }) {
 function MouseCursor() {
   return (
     <svg width="30" height="38" viewBox="0 0 30 38" fill="none">
-      <path d="M6 4L25 21L15 22L10 32L6 4Z" fill="#e8e0fa" stroke="#9984c8" strokeWidth="1.5" />
+      <path d="M6 4L25 21L15 22L10 32L6 4Z" fill="#f7dfcc" stroke="#cc8a59" strokeWidth="1.5" />
     </svg>
   );
 }

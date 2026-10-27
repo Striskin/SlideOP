@@ -24,6 +24,7 @@ export async function exportDesign(
   page: Page,
   format: ExportFormat,
   multiplier: number,
+  transparent = false,
 ) {
   if (format === 'pdf') {
     const { jsPDF } = await import('jspdf');
@@ -57,6 +58,7 @@ export async function exportDesign(
   if (page.width * page.height * multiplier * multiplier > 40_000_000)
     throw new Error('Export is too large. Choose a smaller scale (maximum 40 megapixels).');
   await withPage(page, async (canvas) => {
+    if (format === 'png' && transparent) canvas.backgroundColor = '';
     if (format === 'svg') {
       let svg = canvas.toSVG();
       const ids = new Set(

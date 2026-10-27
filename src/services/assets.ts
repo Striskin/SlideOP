@@ -3,6 +3,21 @@ import { uid } from '../model/document';
 
 const assets = new Map<string, Asset>();
 const urls = new Map<string, string>();
+const deleted = new Set<string>();
+const listeners = new Set<() => void>();
+let revision = 0;
+const notify = () => {
+  revision++;
+  listeners.forEach((listener) => listener());
+};
+export const assetsRevision = () => revision;
+export const subscribeAssets = (listener: () => void) => {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+};
+export const isAssetDeleted = (id: string) => deleted.has(id);
 export function assetList() {
   return [...assets.values()];
 }
@@ -10,7 +25,17 @@ export function getAsset(id: string) {
   return assets.get(id);
 }
 export function registerAsset(asset: Asset) {
+  if (deleted.has(asset.id)) return;
   assets.set(asset.id, asset);
+  notify();
+}
+export function forgetAsset(id: string) {
+  deleted.add(id);
+  const url = urls.get(id);
+  if (url) URL.revokeObjectURL(url);
+  urls.delete(id);
+  assets.delete(id);
+  notify();
 }
 export function assetURL(id: string) {
   if (urls.has(id)) return urls.get(id)!;
@@ -24,6 +49,7 @@ export function clearAssets() {
   urls.forEach(URL.revokeObjectURL);
   urls.clear();
   assets.clear();
+  notify();
 }
 export async function decodeAsset(blob: Blob, name: string, id: string = uid()): Promise<Asset> {
   if (!['image/png', 'image/jpeg', 'image/webp'].includes(blob.type))

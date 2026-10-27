@@ -20,15 +20,22 @@ export function contrast(a: string, b: string) {
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
 }
 export async function checkPage(page: Page): Promise<Warning[]> {
-  const canvas = new StaticCanvas(undefined, { width: page.width, height: page.height });
+  // Bounds use object coordinates; no page-sized bitmap is needed for inspection.
+  const canvas = new StaticCanvas(undefined, {
+    width: 1,
+    height: 1,
+    enableRetinaScaling: false,
+    renderOnAddRemove: false,
+  });
   const warnings: Warning[] = [];
   try {
     await populate(canvas, page);
     const objects = canvas.getObjects().filter((o) => o.visible);
     const boxes = objects.map((o) => o.getBoundingRect());
+    const byId = new Map(page.elements.map((e) => [e.id, e]));
     objects.forEach((o, i) => {
       const b = boxes[i],
-        e = page.elements.find((e) => e.id === objectId(o))!;
+        e = byId.get(objectId(o))!;
       if (
         b.left < -0.5 ||
         b.top < -0.5 ||
@@ -58,7 +65,7 @@ export async function checkPage(page: Page): Promise<Warning[]> {
             detail: `“${e.name}” has ${ratio.toFixed(1)}:1 contrast against the page. Try a darker or lighter color.`,
           });
       }
-      for (let j = 0; j < i; j++) {
+      for (let j = 0; j < i && warnings.length < 100; j++) {
         const c = boxes[j],
           other = objects[j];
         const width = Math.min(b.left + b.width, c.left + c.width) - Math.max(b.left, c.left),

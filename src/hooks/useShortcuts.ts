@@ -8,6 +8,7 @@ import { persistCurrent } from './useProject';
 export function useShortcuts() {
   useEffect(() => {
     let handBefore = false;
+    let spacePan = false;
     const down = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
@@ -18,6 +19,8 @@ export function useShortcuts() {
       if (target.closest('input,textarea,select,[contenteditable="true"],[role="dialog"]')) return;
       const active = liveCanvas?.getActiveObject();
       if (active instanceof Textbox && active.isEditing) return;
+      // Preserve native Space activation while arrow keys can still nudge a selection.
+      if (target.closest('button,a,[role="button"]') && e.code === 'Space') return;
       const s = useEditor.getState(),
         mod = e.ctrlKey || e.metaKey,
         key = e.key.toLowerCase();
@@ -63,10 +66,12 @@ export function useShortcuts() {
         liveCanvas?.discardActiveObject();
         liveCanvas?.requestRenderAll();
         s.select([]);
+        if (s.scopePath.length) s.exitGroup();
       } else if (e.code === 'Space') {
         e.preventDefault();
         if (!e.repeat) {
           handBefore = s.tool === 'hand';
+          spacePan = true;
           s.set({ tool: 'hand' });
         }
       } else if (!mod && key === 'v') s.set({ tool: 'select' });
@@ -86,14 +91,20 @@ export function useShortcuts() {
         );
       }
     };
+    const releasePan = () => {
+      if (spacePan && !handBefore) useEditor.getState().set({ tool: 'select' });
+      spacePan = false;
+    };
     const up = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !handBefore) useEditor.getState().set({ tool: 'select' });
+      if (e.code === 'Space') releasePan();
     };
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
+    window.addEventListener('blur', releasePan);
     return () => {
       window.removeEventListener('keydown', down);
       window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', releasePan);
     };
   }, []);
 }

@@ -6,10 +6,7 @@ import {
   Upload,
   Layers,
   Sparkles,
-  Search,
   ChevronRight,
-  ArrowUpRight,
-  Plus,
   Eye,
   EyeOff,
   LockKeyhole,
@@ -20,16 +17,30 @@ import {
   Palette,
   Check,
   LayoutGrid,
+  WandSparkles,
+  Trash2,
+  HardDrive,
 } from 'lucide-react';
-import type { Element } from '../model/document';
 import { presets } from '../model/document';
 import { useEditor } from '../store/editor';
 import type { Tab } from '../store/editor';
-import { assetList, assetURL, uploadAsset } from '../services/assets';
-import { IconButton } from './ui';
+import { assetURL, uploadAsset } from '../services/assets';
+import type { UploadSummary } from '../services/persistence';
+import { IconButton, Modal } from './ui';
+import { useAssets } from '../hooks/useAssets';
+import { deleteUpload } from '../hooks/useProject';
+import { StoredUploadsDialog } from './StoredUploadsDialog';
+import { ElementsLibrary } from './ElementsLibrary';
+import { TextLibrary } from './TextLibrary';
+import { StylesPanel } from './StylesPanel';
+import { useEditingPage } from '../hooks/useEditingPage';
+import { BuildPanel } from './BuildPanel';
+import { LayoutsLibrary } from './LayoutsLibrary';
+import { PageThemes } from './PageThemes';
 
 const tabs = [
   { name: 'Design', icon: LayoutTemplate },
+  { name: 'Build', icon: WandSparkles },
   { name: 'Elements', icon: Shapes },
   { name: 'Text', icon: Type },
   { name: 'Uploads', icon: Upload },
@@ -41,14 +52,6 @@ const palettes = [
   ['#f4f7fb', '#24364b', '#80a3c4', '#d7e4ee', '#e4b3a4'],
   ['#fbf0ef', '#943f51', '#e48d98', '#efbdab', '#6c5c62'],
   ['#eeeee4', '#344333', '#9ca78a', '#d5c7a9', '#b06d4d'],
-];
-const shapes: { kind: Element['kind']; label: string; path: string }[] = [
-  { kind: 'rect', label: 'Rectangle', path: 'M8 14h48v36H8z' },
-  { kind: 'ellipse', label: 'Circle', path: 'M32 8a24 24 0 1 0 0 48a24 24 0 1 0 0-48' },
-  { kind: 'triangle', label: 'Triangle', path: 'M32 8L59 54H5z' },
-  { kind: 'line', label: 'Line', path: 'M7 32h50v2H7z' },
-  { kind: 'arrow', label: 'Arrow', path: 'M6 25h31V12l23 20-23 20V39H6z' },
-  { kind: 'polygon', label: 'Hexagon', path: 'M19 8h26l15 24-15 24H19L4 32z' },
 ];
 export function Sidebar() {
   const tab = useEditor((s) => s.tab),
@@ -88,6 +91,8 @@ export function Sidebar() {
           <div className="library-content">
             {tab === 'Design' ? (
               <DesignLibrary />
+            ) : tab === 'Build' ? (
+              <BuildPanel />
             ) : tab === 'Elements' ? (
               <ElementsLibrary />
             ) : tab === 'Text' ? (
@@ -109,6 +114,7 @@ function DesignLibrary() {
   const page = useEditor((s) => s.document.pages.find((p) => p.id === s.pageId)!);
   return (
     <>
+      <StylesPanel />
       <div className="creative-card">
         <span className="eyebrow">A SPACE TO CREATE</span>
         <h3>
@@ -145,13 +151,14 @@ function DesignLibrary() {
               <small>{p.detail}</small>
             </span>
             {p.width === page.width && p.height === page.height ? (
-              <Check size={16} className="purple" />
+              <Check size={16} className="accent-text" />
             ) : (
               <ChevronRight size={15} />
             )}
           </button>
         ))}
       </div>
+      <PageThemes />
       <div className="section-heading">
         <h3>Color stories</h3>
         <Palette size={16} />
@@ -183,171 +190,13 @@ function DesignLibrary() {
     </>
   );
 }
-function ElementsLibrary() {
-  const [search, setSearch] = useState('');
-  return (
-    <>
-      <label className="search-field">
-        <Search size={16} />
-        <input
-          placeholder="Find a shape"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-      </label>
-      <div className="section-heading">
-        <h3>Basic shapes</h3>
-        <span>6</span>
-      </div>
-      <div className="shape-grid">
-        {shapes
-          .filter((s) => s.label.toLowerCase().includes(search.toLowerCase()))
-          .map((shape) => (
-            <button
-              key={shape.kind}
-              aria-label={`Add ${shape.label.toLowerCase()}`}
-              title={`Add ${shape.label.toLowerCase()}`}
-              onClick={() => useEditor.getState().add(shape.kind)}
-            >
-              <svg viewBox="0 0 64 64">
-                <path d={shape.path} />
-              </svg>
-              <span>{shape.label}</span>
-            </button>
-          ))}
-      </div>
-      <div className="section-heading">
-        <h3>A little more character</h3>
-      </div>
-      <div className="shape-grid">
-        <button onClick={() => useEditor.getState().add('rect', { radius: 40 })}>
-          <div className="shape-preview rounded" />
-          <span>Rounded</span>
-        </button>
-        <button
-          onClick={() => useEditor.getState().add('rect', { width: 180, height: 300, radius: 90 })}
-        >
-          <div className="shape-preview arch" />
-          <span>Capsule</span>
-        </button>
-        <button
-          onClick={() =>
-            useEditor.getState().add('polygon', {
-              width: 200,
-              height: 200,
-              points: Array.from({ length: 10 }, (_, i) => {
-                const radius = i % 2 ? 45 : 100,
-                  angle = -Math.PI / 2 + (i * Math.PI) / 5;
-                return { x: 100 + Math.cos(angle) * radius, y: 100 + Math.sin(angle) * radius };
-              }),
-            })
-          }
-        >
-          <span className="star-preview">★</span>
-          <span>Star</span>
-        </button>
-      </div>
-      <div className="tip">
-        <MouseHint />
-        Hold <kbd>Shift</kbd> to select multiple objects. Resize and rotate with the canvas handles.
-      </div>
-    </>
-  );
-}
-function MouseHint() {
-  return <span className="tip-icon">↖</span>;
-}
-function TextLibrary() {
-  return (
-    <>
-      <button className="primary full" onClick={() => useEditor.getState().add('text')}>
-        <Plus size={17} />
-        Add a text box
-      </button>
-      <div className="section-heading">
-        <h3>Start with the essentials</h3>
-      </div>
-      <div className="text-presets">
-        <button
-          className="text-heading"
-          onClick={() =>
-            useEditor
-              .getState()
-              .add('text', { text: 'Add a heading', fontSize: 72, fontWeight: 'bold', width: 700 })
-          }
-        >
-          Add a heading
-        </button>
-        <button
-          className="text-subheading"
-          onClick={() =>
-            useEditor.getState().add('text', { text: 'Add a subheading', fontSize: 36, width: 600 })
-          }
-        >
-          Add a subheading
-        </button>
-        <button
-          onClick={() =>
-            useEditor
-              .getState()
-              .add('text', { text: 'A little bit of body text', fontSize: 22, width: 500 })
-          }
-        >
-          A little bit of body text
-        </button>
-      </div>
-      <div className="section-heading">
-        <h3>Find your voice</h3>
-        <Type size={16} />
-      </div>
-      <button
-        className="type-card editorial"
-        onClick={() =>
-          useEditor.getState().add('text', {
-            text: 'Less, but\nbetter.',
-            fontFamily: 'Georgia',
-            fontSize: 80,
-            width: 600,
-          })
-        }
-      >
-        <span>THE EDITORIAL</span>
-        <strong>
-          Less, but
-          <br />
-          <em>better.</em>
-        </strong>
-        <ArrowUpRight size={20} />
-      </button>
-      <button
-        className="type-card bold-type"
-        onClick={() =>
-          useEditor.getState().add('text', {
-            text: 'MAKE\nYOUR MARK.',
-            fontFamily: 'Impact',
-            fontSize: 92,
-            width: 650,
-          })
-        }
-      >
-        <span>THE STATEMENT</span>
-        <strong>
-          MAKE
-          <br />
-          YOUR MARK.
-        </strong>
-        <ArrowUpRight size={20} />
-      </button>
-      <p className="muted small">
-        Double-click text on the canvas to edit. Select a text box to refine its typography.
-      </p>
-    </>
-  );
-}
 function UploadsLibrary() {
   const input = useRef<HTMLInputElement>(null);
-  const [revision, setRevision] = useState(0),
-    [busy, setBusy] = useState(false);
+  const assets = useAssets();
+  const [busy, setBusy] = useState(false),
+    [pending, setPending] = useState<UploadSummary | null>(null),
+    [deleteError, setDeleteError] = useState(''),
+    [manage, setManage] = useState(false);
   const add = async (files: FileList | null) => {
     if (!files) return;
     setBusy(true);
@@ -364,7 +213,6 @@ function UploadsLibrary() {
           scaleY: scale,
         });
       }
-      setRevision(revision + 1);
     } catch (error) {
       useEditor
         .getState()
@@ -376,6 +224,70 @@ function UploadsLibrary() {
   };
   return (
     <>
+      {manage && !pending && (
+        <StoredUploadsDialog
+          onClose={() => setManage(false)}
+          onDelete={(asset) => {
+            setDeleteError('');
+            setPending(asset);
+          }}
+        />
+      )}
+      {pending && (
+        <Modal
+          title="Permanently delete upload?"
+          onClose={() => {
+            if (!busy) setPending(null);
+          }}
+        >
+          <p>
+            <strong>{pending.name}</strong>
+            <br />
+            {(pending.size / 1024).toFixed(1)} KB · {pending.width} × {pending.height}
+          </p>
+          <p>
+            This deletes SlideOP's stored image and removes its placements from all local projects,
+            saved versions, Trash, undo history, and the editor clipboard.
+          </p>
+          <p className="small muted">
+            This cannot be undone. Your original file and previously downloaded exports are not
+            deleted.
+          </p>
+          {deleteError && (
+            <p className="error-message" role="alert">
+              {deleteError}
+            </p>
+          )}
+          <div className="two-buttons">
+            <button className="secondary" disabled={busy} onClick={() => setPending(null)}>
+              Keep upload
+            </button>
+            <button
+              className="danger"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                setDeleteError('');
+                void deleteUpload(pending.id)
+                  .then(() => {
+                    setPending(null);
+                    useEditor
+                      .getState()
+                      .set({ toast: 'Upload permanently deleted from SlideOP storage.' });
+                  })
+                  .catch((error: unknown) =>
+                    setDeleteError(
+                      error instanceof Error ? error.message : 'Could not delete this upload.',
+                    ),
+                  )
+                  .finally(() => setBusy(false));
+              }}
+            >
+              {busy ? 'Deleting…' : 'Delete permanently'}
+            </button>
+          </div>
+        </Modal>
+      )}
       <input
         type="file"
         ref={input}
@@ -388,6 +300,24 @@ function UploadsLibrary() {
         <Upload size={17} />
         {busy ? 'Reading images…' : 'Upload images'}
       </button>
+      <button
+        className="secondary full manage-uploads-button"
+        disabled={busy}
+        onClick={() => setManage(true)}
+      >
+        <HardDrive size={16} />
+        Manage stored uploads
+      </button>
+      <div className="cutout-note">
+        <WandSparkles size={20} />
+        <div>
+          <strong>Background gone. Possibilities open.</strong>
+          <p>
+            Upload an image, select it, then choose <b>Remove background</b> in Image tools. Free,
+            private, and on-device.
+          </p>
+        </div>
+      </div>
       <div
         className="upload-drop"
         onDragOver={(e) => e.preventDefault()}
@@ -409,29 +339,53 @@ function UploadsLibrary() {
       </div>
       <div className="section-heading">
         <h3>Your uploads</h3>
-        <span>{assetList().length}</span>
+        <span>{assets.length}</span>
       </div>
       <div className="asset-grid">
-        {assetList().map((a) => (
-          <button
-            key={a.id}
-            title={`Add ${a.name}`}
-            onClick={() => {
-              const scale = Math.min(1, 500 / a.width, 500 / a.height);
-              useEditor.getState().add('image', {
-                assetId: a.id,
-                name: a.name,
-                width: a.width,
-                height: a.height,
-                scaleX: scale,
-                scaleY: scale,
-              });
-            }}
-          >
-            <img src={assetURL(a.id)} alt={a.name} />
-          </button>
+        {assets.map((a) => (
+          <div className="upload-asset" key={a.id}>
+            <button
+              className="asset-add"
+              disabled={busy}
+              title={`Add ${a.name}`}
+              aria-label={`Add upload ${a.name}`}
+              onClick={() => {
+                const scale = Math.min(1, 500 / a.width, 500 / a.height);
+                useEditor.getState().add('image', {
+                  assetId: a.id,
+                  name: a.name,
+                  width: a.width,
+                  height: a.height,
+                  scaleX: scale,
+                  scaleY: scale,
+                });
+              }}
+            >
+              <img src={assetURL(a.id)} alt={a.name} />
+            </button>
+            <div className="asset-caption">
+              <span title={a.name}>{a.name}</span>
+              <IconButton
+                label={`Delete upload ${a.name}`}
+                disabled={busy}
+                onClick={() => {
+                  setDeleteError('');
+                  setPending({
+                    id: a.id,
+                    name: a.name,
+                    width: a.width,
+                    height: a.height,
+                    size: a.blob.size,
+                  });
+                }}
+              >
+                <Trash2 size={15} />
+              </IconButton>
+            </div>
+          </div>
         ))}
       </div>
+      {!assets.length && <p className="small muted">No uploads in this project.</p>}
       <div className="tip">
         Images stay on this device. SVG and HTML uploads are intentionally blocked; use PNG, JPEG,
         or WebP.
@@ -440,45 +394,10 @@ function UploadsLibrary() {
   );
 }
 function TemplatesLibrary() {
-  return (
-    <div className="coming-soon">
-      <div className="template-art">
-        <div />
-        <div />
-        <div />
-        <Sparkles size={26} />
-      </div>
-      <span className="pill">A LITTLE SOMETHING IN THE WORKS</span>
-      <h3>
-        Made by people.
-        <br />
-        Remixed by you.
-      </h3>
-      <p>
-        A community of ideas is on its way. Share what you create, discover new perspectives, and
-        make them your own.
-      </p>
-      <div className="coming-label">
-        <span className="status-dot" />
-        Community templates · Coming soon
-      </div>
-      <p className="small muted">
-        For now, every great design
-        <br />
-        starts with your imagination.
-      </p>
-      <button
-        className="secondary full"
-        onClick={() => useEditor.getState().set({ tab: 'Design' })}
-      >
-        Make something original
-        <ArrowUpRight size={16} />
-      </button>
-    </div>
-  );
+  return <LayoutsLibrary />;
 }
 function LayersLibrary() {
-  const page = useEditor((s) => s.document.pages.find((p) => p.id === s.pageId)!),
+  const page = useEditingPage(),
     selection = useEditor((s) => s.selection);
   return (
     <>
@@ -488,6 +407,7 @@ function LayersLibrary() {
           <div
             key={e.id}
             className={`layer-row ${selection.includes(e.id) ? 'selected' : ''}`}
+            onDoubleClick={() => useEditor.getState().enterGroup(e.id)}
             onClick={(event) =>
               useEditor
                 .getState()
@@ -507,7 +427,19 @@ function LayersLibrary() {
             </span>
             <input
               aria-label={`Rename ${e.name}`}
+              title="Click to select. Double-click to rename."
               value={e.name}
+              onMouseDown={(event) => {
+                if (document.activeElement !== event.currentTarget) event.preventDefault();
+              }}
+              onDoubleClick={(event) => {
+                event.stopPropagation();
+                event.currentTarget.focus();
+                event.currentTarget.select();
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') event.currentTarget.blur();
+              }}
               onChange={(ev) => useEditor.getState().update([e.id], { name: ev.target.value })}
             />
             <IconButton

@@ -22,8 +22,16 @@ import { importProject, exportProject } from '../services/persistence';
 import { persistCurrent } from '../hooks/useProject';
 import type { DialogName } from './Dialogs';
 import { IconButton } from './ui';
+import { presets } from '../model/document';
 
 export function TopBar({ openDialog }: { openDialog: (name: DialogName) => void }) {
+  const designType = useEditor((s) => {
+    const page = s.document.pages.find((p) => p.id === s.pageId)!;
+    return (
+      presets.find((p) => p.width === page.width && p.height === page.height)?.name ??
+      'Custom design'
+    );
+  });
   const name = useEditor((s) => s.document.name),
     saved = useEditor((s) => s.saved),
     theme = useEditor((s) => s.theme),
@@ -142,7 +150,7 @@ export function TopBar({ openDialog }: { openDialog: (name: DialogName) => void 
             <ChevronDown size={13} />
           </button>
         )}
-        <span className="project-type">Presentation · Personal workspace</span>
+        <span className="project-type">{designType} · Personal workspace</span>
       </div>
       <button
         className={`save-state ${saved === 'error' ? 'error' : ''}`}

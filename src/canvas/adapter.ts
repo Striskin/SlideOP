@@ -30,6 +30,10 @@ export async function toFabric(
 ): Promise<DesignObject> {
   let object: FabricObject;
   if (e.kind === 'text')
+    await document.fonts.load(
+      `${e.fontStyle ?? 'normal'} ${e.fontWeight ?? 'normal'} ${e.fontSize ?? 48}px "${e.fontFamily ?? 'Arial'}"`,
+    );
+  if (e.kind === 'text')
     object = new Textbox(e.text ?? '', {
       width: e.width,
       fontFamily: e.fontFamily ?? 'Arial',
@@ -40,7 +44,7 @@ export async function toFabric(
       textAlign: e.textAlign ?? 'left',
       charSpacing: e.charSpacing ?? 0,
       lineHeight: e.lineHeight ?? 1.16,
-      splitByGrapheme: false,
+      splitByGrapheme: !!e.characterWrap,
     });
   else if (e.kind === 'ellipse') object = new Ellipse({ rx: e.width / 2, ry: e.height / 2 });
   else if (e.kind === 'triangle') object = new Triangle({ width: e.width, height: e.height });
@@ -113,8 +117,8 @@ export async function toFabric(
     lockScalingX: e.locked,
     lockScalingY: e.locked,
     cornerColor: '#ffffff',
-    cornerStrokeColor: '#8462df',
-    borderColor: '#8462df',
+    cornerStrokeColor: '#d46b2d',
+    borderColor: '#d46b2d',
     cornerSize: 9,
     transparentCorners: false,
     padding: 0,
@@ -149,6 +153,21 @@ export async function toFabric(
         offsetY: e.shadow.y,
       }),
     );
+  if (e.clip) {
+    object.set({
+      clipPath: new Rect({
+        originX: 'left',
+        originY: 'top',
+        left: e.clip.x - object.width / 2,
+        top: e.clip.y - object.height / 2,
+        width: e.clip.width,
+        height: e.clip.height,
+        fill: '#000000',
+        strokeWidth: 0,
+      }),
+      perPixelTargetFind: true,
+    });
+  }
   const result = object as DesignObject;
   result.elementId = e.id;
   result.sourceElement = e;
@@ -244,6 +263,40 @@ export async function renderPage(
   }
 }
 export let liveCanvas: Canvas | null = null;
+export async function renderCropSource(element: Element) {
+  const object = await toFabric({
+    ...element,
+    clip: undefined,
+    x: 0,
+    y: 0,
+    rotation: 0,
+    scaleX: 1,
+    scaleY: 1,
+    skewX: 0,
+    skewY: 0,
+    flipX: false,
+    flipY: false,
+    opacity: 1,
+    visible: true,
+    locked: false,
+  });
+  const width = Math.max(1, object.width),
+    height = Math.max(1, object.height);
+  const scale = Math.min(1, 680 / width, 400 / height);
+  const canvas = new StaticCanvas(undefined, {
+    width: Math.ceil(width * scale),
+    height: Math.ceil(height * scale),
+    enableRetinaScaling: false,
+  });
+  try {
+    canvas.setZoom(scale);
+    canvas.add(object);
+    canvas.renderAll();
+    return { url: canvas.toDataURL({ format: 'png', multiplier: 1 }), width, height };
+  } finally {
+    await canvas.dispose();
+  }
+}
 export function setLiveCanvas(canvas: Canvas | null) {
   liveCanvas = canvas;
 }

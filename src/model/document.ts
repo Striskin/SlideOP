@@ -1,9 +1,16 @@
 import { z } from 'zod';
+import { fontNames } from './fonts';
 
 export const uid = () => crypto.randomUUID();
 const finite = z.number().finite();
 const color = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 const point = z.object({ x: finite.min(-100000).max(100000), y: finite.min(-100000).max(100000) });
+export const layoutContentSchema = z.object({
+  title: z.string().max(300),
+  subtitle: z.string().max(1200),
+  items: z.array(z.object({ heading: z.string().max(160), body: z.string().max(1600) })).max(6),
+});
+export type LayoutContent = z.infer<typeof layoutContentSchema>;
 const base = z.object({
   id: z.string().min(1).max(100),
   name: z.string().max(200),
@@ -39,9 +46,7 @@ const base = z.object({
   gradient: z.object({ end: color, angle: finite }).optional(),
   shadow: z.object({ color, blur: finite.min(0).max(200), x: finite, y: finite }).optional(),
   text: z.string().max(50000).optional(),
-  fontFamily: z
-    .enum(['Arial', 'Georgia', 'Verdana', 'Courier New', 'Trebuchet MS', 'Impact'])
-    .optional(),
+  fontFamily: z.enum(fontNames).optional(),
   fontSize: finite.min(1).max(1000).optional(),
   fontWeight: z.enum(['normal', 'bold']).optional(),
   fontStyle: z.enum(['normal', 'italic']).optional(),
@@ -52,8 +57,47 @@ const base = z.object({
   assetId: z.string().max(100).optional(),
   cropX: finite.min(0).optional(),
   cropY: finite.min(0).optional(),
+  clip: z
+    .object({
+      x: finite.min(0).max(20000),
+      y: finite.min(0).max(20000),
+      width: finite.positive().max(20000),
+      height: finite.positive().max(20000),
+    })
+    .optional(),
   points: z.array(point).min(3).max(50).optional(),
+  styleId: z.string().max(100).optional(),
+  themeRole: z.enum(['ink', 'muted', 'accent', 'secondary', 'surface', 'background']).optional(),
+  layoutPart: z.boolean().optional(),
+  contentKey: z.string().max(40).optional(),
+  characterWrap: z.boolean().optional(),
 });
+export const stylePropertiesSchema = base
+  .pick({
+    fill: true,
+    stroke: true,
+    strokeWidth: true,
+    opacity: true,
+    radius: true,
+    gradient: true,
+    shadow: true,
+    fontFamily: true,
+    fontSize: true,
+    fontWeight: true,
+    fontStyle: true,
+    underline: true,
+    textAlign: true,
+    charSpacing: true,
+    lineHeight: true,
+  })
+  .partial();
+export const savedStyleSchema = z.object({
+  id: z.string().min(1).max(100),
+  name: z.string().min(1).max(100),
+  kind: z.enum(['text', 'shape']),
+  properties: stylePropertiesSchema,
+});
+export type SavedStyle = z.infer<typeof savedStyleSchema>;
 export type Element = z.infer<typeof base> & { children?: Element[] };
 export const elementSchema: z.ZodType<Element> = base.extend({
   children: z.lazy(() => z.array(elementSchema).max(2000)).optional(),
@@ -66,6 +110,9 @@ export const pageSchema = z.object({
   background: color,
   elements: z.array(elementSchema).max(2000),
   guides: z.array(z.object({ axis: z.enum(['x', 'y']), position: finite })).max(100),
+  layout: z
+    .object({ id: z.string().max(50), themeId: z.string().max(50), content: layoutContentSchema })
+    .optional(),
 });
 export const documentSchema = z.object({
   format: z.literal('slideop'),
@@ -74,6 +121,8 @@ export const documentSchema = z.object({
   name: z.string().min(1).max(200),
   updatedAt: z.string(),
   pages: z.array(pageSchema).min(1).max(100),
+  styles: z.array(savedStyleSchema).max(100).optional(),
+  palette: z.array(color).max(32).optional(),
 });
 export type Page = z.infer<typeof pageSchema>;
 export type DesignDocument = z.infer<typeof documentSchema>;
@@ -106,7 +155,7 @@ export function makeElement(kind: Element['kind'], overrides: Partial<Element> =
     skewY: 0,
     flipX: false,
     flipY: false,
-    fill: '#9b85e8',
+    fill: '#ed965d',
     stroke: '#282432',
     strokeWidth: 0,
     opacity: 1,
@@ -119,7 +168,7 @@ export function makeElement(kind: Element['kind'], overrides: Partial<Element> =
           width: 500,
           height: 70,
           fontSize: 48,
-          fontFamily: 'Arial',
+          fontFamily: 'DM Sans',
           fontWeight: 'normal',
           fontStyle: 'normal',
           textAlign: 'left',
@@ -172,6 +221,9 @@ export function validateDocument(input: unknown): DesignDocument {
     ...doc.pages.flatMap((p) => [p.id, ...walkElements(p.elements).map((e) => e.id)]),
   ];
   if (new Set(ids).size !== ids.length) throw new Error('Project contains duplicate IDs.');
+  const styles = doc.styles ?? [];
+  if (new Set(styles.map((style) => style.id)).size !== styles.length)
+    throw new Error('Project contains duplicate style IDs.');
   for (const e of doc.pages.flatMap((p) => walkElements(p.elements))) {
     if (e.kind === 'image' && !e.assetId) throw new Error('Image is missing an asset.');
     if (e.kind === 'group' && !e.children?.length)
@@ -179,11 +231,12 @@ export function validateDocument(input: unknown): DesignDocument {
   }
   return doc;
 }
-export function cloneElements(elements: Element[], offset = 24): Element[] {
+export function cloneElements(elements: Element[], offset = 24, preserveLayout = false): Element[] {
   const clone = (e: Element): Element => ({
     ...structuredClone(e),
     id: uid(),
     children: e.children?.map(clone),
+    ...(preserveLayout ? {} : { layoutPart: undefined, contentKey: undefined }),
   });
   return elements.map((e) => ({ ...clone(e), x: e.x + offset, y: e.y + offset }));
 }

@@ -158,6 +158,64 @@ test('optional real local background inference', async ({ page }) => {
   });
   const after = (await savedDocument(page)).pages[0].elements.at(-1)!;
   expect(after.assetId).not.toBe(before.assetId);
+  await expect(
+    page.getByRole('button', { name: 'Download cutout PNG', exact: true }),
+  ).toBeVisible();
+});
+
+test('orange studio, expanded fonts and shapes, and transparent PNG export', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.goto('/');
+  await expect(page.getByText('Opening your studio…')).toBeHidden();
+  expect(
+    await page.evaluate(() =>
+      getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(),
+    ),
+  ).toBe('#c9551c');
+  await page.getByRole('button', { name: 'File', exact: true }).click();
+  await page.getByRole('button', { name: 'New design', exact: true }).click();
+  await page.getByRole('button', { name: 'Text', exact: true }).click();
+  await page.getByRole('button', { name: 'Add Playfair Display text', exact: true }).click();
+  await expect(page.getByRole('combobox', { name: 'Font family', exact: true })).toHaveValue(
+    'Playfair Display',
+  );
+  await expect
+    .poll(() => page.evaluate(() => document.fonts.check('56px "Playfair Display"')))
+    .toBe(true);
+  await page.getByRole('combobox', { name: 'Font family', exact: true }).selectOption('Manrope');
+  await expect.poll(() => page.evaluate(() => document.fonts.check('56px "Manrope"'))).toBe(true);
+  await page.getByRole('button', { name: 'Elements', exact: true }).click();
+  await expect(page.locator('.shape-grid button')).toHaveCount(24);
+  await page.getByRole('textbox', { name: 'Find a shape', exact: true }).fill('heart');
+  await page.getByRole('button', { name: 'Add heart', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Element name', exact: true })).toHaveValue(
+    'Heart',
+  );
+  const doc = await savedDocument(page);
+  expect(doc.pages[0].elements[0].fontFamily).toBe('Manrope');
+  expect(doc.pages[0].elements[1].points).toHaveLength(48);
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page.getByLabel('Transparent background').check();
+  const pending = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download design', exact: true }).click();
+  const png = await pending;
+  await png.saveAs('test-results/transparent.png');
+  const data = (await readFile('test-results/transparent.png')).toString('base64');
+  const alpha = await page.evaluate(async (data) => {
+    const image = await createImageBitmap(
+      await (await fetch('data:image/png;base64,' + data)).blob(),
+    );
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    const context = canvas.getContext('2d')!;
+    context.drawImage(image, 0, 0);
+    image.close();
+    return context.getImageData(0, 0, 1, 1).data[3];
+  }, data);
+  expect(alpha).toBe(0);
+  expect(errors).toEqual([]);
 });
 
 test('group and ungroup preserve geometry; editable project and all-page PDF export work', async ({

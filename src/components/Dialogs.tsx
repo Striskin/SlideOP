@@ -30,6 +30,7 @@ import type { Warning } from '../services/checker';
 import type { DesignDocument } from '../model/document';
 import { renderPage } from '../canvas/adapter';
 import { PageThumbnail } from './PageStrip';
+import { RecoveryPanel } from './RecoveryPanel';
 
 export type DialogName = 'export' | 'preview' | 'projects' | 'checker' | 'shortcuts' | null;
 export function Dialogs({ name, onClose }: { name: DialogName; onClose: () => void }) {
@@ -78,6 +79,7 @@ export function Dialogs({ name, onClose }: { name: DialogName; onClose: () => vo
 function ExportDialog({ onClose }: { onClose: () => void }) {
   const [format, setFormat] = useState<ExportFormat | 'slideop'>('png'),
     [scale, setScale] = useState(1),
+    [transparent, setTransparent] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   const run = async () => {
@@ -86,7 +88,14 @@ function ExportDialog({ onClose }: { onClose: () => void }) {
     try {
       const doc = useEditor.getState().document;
       if (format === 'slideop') await exportProject(doc);
-      else await exportDesign(doc, currentPage(), format, scale);
+      else
+        await exportDesign(
+          doc,
+          doc.pages.find((p) => p.id === useEditor.getState().pageId)!,
+          format,
+          scale,
+          transparent,
+        );
       useEditor.getState().set({ toast: 'Your export is ready.' });
       onClose();
     } catch (e) {
@@ -116,6 +125,16 @@ function ExportDialog({ onClose }: { onClose: () => void }) {
             <option value="2">2× · High resolution</option>
             <option value="3">3× · Extra high resolution</option>
           </select>
+        </label>
+      )}
+      {format === 'png' && (
+        <label className="check-row export-transparent">
+          <input
+            type="checkbox"
+            checked={transparent}
+            onChange={(e) => setTransparent(e.target.checked)}
+          />
+          Transparent background
         </label>
       )}
       <div className="export-info">
@@ -194,6 +213,7 @@ function PreviewDialog({ onClose }: { onClose: () => void }) {
   );
 }
 function ProjectsDialog({ onClose }: { onClose: () => void }) {
+  const [refresh, setRefresh] = useState(0);
   const [projects, setProjects] = useState<DesignDocument[]>([]),
     [error, setError] = useState(''),
     [confirm, setConfirm] = useState<string | null>(null),
@@ -203,7 +223,7 @@ function ProjectsDialog({ onClose }: { onClose: () => void }) {
       .then(() => listProjects())
       .then(setProjects)
       .catch(() => setError('Could not read local projects.'));
-  }, []);
+  }, [refresh]);
   const open = async (id: string) => {
     setBusy(true);
     try {
@@ -259,7 +279,11 @@ function ProjectsDialog({ onClose }: { onClose: () => void }) {
                 <FolderOpen size={15} />
                 <strong>{project.name}</strong>
               </button>
-              <IconButton label={`Delete ${project.name}`} onClick={() => setConfirm(project.id)}>
+              <IconButton
+                label={`Delete ${project.name}`}
+                disabled={busy}
+                onClick={() => setConfirm(project.id)}
+              >
                 <Trash2 size={15} />
               </IconButton>
             </div>
@@ -269,17 +293,27 @@ function ProjectsDialog({ onClose }: { onClose: () => void }) {
             </small>
             {confirm === project.id && (
               <div className="delete-confirm">
-                <span>Delete this saved copy?</span>
+                <span>Move this project to Trash?</span>
                 <button
                   className="danger"
                   onClick={() => {
-                    void deleteProject(project.id)
+                    setBusy(true);
+                    void persistCurrent()
+                      .then(async (saved) => {
+                        if (!saved) throw new Error('Save failed');
+                        await deleteProject(project.id);
+                        if (useEditor.getState().document.id === project.id)
+                          useEditor.getState().newProject();
+                      })
                       .then(() => {
                         setProjects(projects.filter((p) => p.id !== project.id));
                         setConfirm(null);
+                        setRefresh((v) => v + 1);
                       })
-                      .catch(() => setError('Could not delete project.'));
+                      .catch(() => setError('Could not move project to Trash.'))
+                      .finally(() => setBusy(false));
                   }}
+                  disabled={busy}
                 >
                   Delete
                 </button>
@@ -289,6 +323,12 @@ function ProjectsDialog({ onClose }: { onClose: () => void }) {
           </div>
         ))}
       </div>
+      <RecoveryPanel
+        refresh={refresh}
+        onRefresh={() => setRefresh((v) => v + 1)}
+        busy={busy}
+        setBusy={setBusy}
+      />
     </Modal>
   );
 }
