@@ -2,6 +2,8 @@
 
 A local-first design studio built with React, TypeScript, Vite, Fabric.js, Zustand, and IndexedDB. No account, backend, paid API, or subscription is required. All project and image editing happens in your browser.
 
+![SlideOP editor in dark mode, showing the design canvas, tools, and properties panel](image.png)
+
 ## Run locally
 
 Use Node.js **22.12+ or 24 LTS** and npm.
