@@ -9,6 +9,8 @@ import { useEditor } from '../store/editor';
 import { Modal, NumberField } from './ui';
 import { renderCropSource } from '../canvas/adapter';
 import { useEditingPage } from '../hooks/useEditingPage';
+import type { MaskDesign } from '../model/masks';
+import { MaskTools, MaskCanvas } from './MaskEditor';
 
 type CropSource = { url: string; width: number; height: number };
 
@@ -98,6 +100,24 @@ function CropEditor({
         ),
   );
   const [ratio, setRatio] = useState(0);
+  const [mask, setMask] = useState<MaskDesign>({
+    shape: element.clip?.shape ?? 'rect',
+    roundness: element.clip?.roundness,
+    nodes: element.clip?.nodes,
+  });
+  const [editing, setEditing] = useState(false),
+    [drawing, setDrawing] = useState(false),
+    [selected, setSelected] = useState(0);
+  const maskProps = {
+    mask,
+    onChange: setMask,
+    editing,
+    setEditing,
+    drawing,
+    setDrawing,
+    selected,
+    setSelected,
+  };
   const surface = useRef<HTMLDivElement>(null);
   const drag = useRef<{
     x: number;
@@ -156,6 +176,7 @@ function CropEditor({
           ? 'Your source image stays intact.'
           : 'Hidden areas are preserved so your element stays editable.'}
       </p>
+      <MaskTools {...maskProps} />
       <div
         className="crop-surface"
         ref={surface}
@@ -186,7 +207,8 @@ function CropEditor({
             drag.current = null;
           }}
         >
-          <div className="crop-thirds" />
+          {mask.shape === 'rect' && <div className="crop-thirds" />}
+          <MaskCanvas {...maskProps} width={rect.width} height={rect.height} />
           {['nw', 'ne', 'sw', 'se'].map((corner) => (
             <button
               key={corner}
@@ -207,7 +229,7 @@ function CropEditor({
             if (value) setRect(ratioCrop(rect, value, asset.width, asset.height));
           }}
         >
-          <option value={0}>Freeform</option>
+          <option value={0}>Free ratio</option>
           <option value={image ? element.width / element.height : asset.width / asset.height}>
             Current frame
           </option>
@@ -264,18 +286,22 @@ function CropEditor({
           ? 'source pixels. Frame width stays the same; height follows the crop ratio.'
           : 'object units. The original selection frame and position stay the same. Reset crop restores hidden areas.'}
       </p>
-      <div className="two-buttons">
+      <div className="two-buttons crop-actions">
         <button
           className="secondary"
           onClick={() => {
             setRect({ x: 0, y: 0, width: asset.width, height: asset.height });
             setRatio(0);
+            setMask({ shape: 'rect' });
+            setDrawing(false);
+            setEditing(false);
           }}
         >
           Reset crop
         </button>
         <button
           className="primary"
+          disabled={drawing}
           onClick={() => {
             const crop = constrainCrop(rect, asset.width, asset.height);
             const full =
@@ -284,8 +310,20 @@ function CropEditor({
               Math.abs(crop.width - asset.width) < 0.01 &&
               Math.abs(crop.height - asset.height) < 0.01;
             const patch: Partial<Element> = image
-              ? cropPatch(element, crop)
-              : { clip: full ? undefined : crop };
+              ? {
+                  ...cropPatch(element, crop),
+                  clip:
+                    mask.shape === 'rect'
+                      ? undefined
+                      : {
+                          x: 0,
+                          y: 0,
+                          width: crop.width,
+                          height: crop.height,
+                          ...mask,
+                        },
+                }
+              : { clip: mask.shape === 'rect' ? (full ? undefined : crop) : { ...crop, ...mask } };
             if (image && (patch.scaleX! > 100 || patch.scaleY! > 100)) {
               useEditor
                 .getState()

@@ -52,13 +52,11 @@ async function open(page: Page) {
       ],
     }),
   ];
-  await page
-    .locator('input[type=file][accept=".slideop,.json"]')
-    .setInputFiles({
-      name: 'crop-elements.slideop',
-      mimeType: 'application/json',
-      buffer: Buffer.from(JSON.stringify({ document: doc, assets: [] })),
-    });
+  await page.locator('input[type=file][accept=".slideop,.json"]').setInputFiles({
+    name: 'crop-elements.slideop',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({ document: doc, assets: [] })),
+  });
   await expect(page.getByText('Project imported. Make it your own.')).toBeVisible();
   await page.getByRole('button', { name: 'Layers', exact: true }).click();
 }
@@ -159,4 +157,101 @@ test('right-click crop opens for an element and cancellation leaves it intact', 
   await field(page, 'Crop width', '100');
   await page.getByRole('button', { name: 'Close', exact: true }).click();
   expect((await save(page)).pages[0].elements[0].clip).toBeUndefined();
+});
+
+test('creative masks render correctly, support curve controls and freehand editing, and persist', async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await open(page);
+  await page.getByRole('textbox', { name: 'Rename Crop rectangle', exact: true }).click();
+  await page.getByRole('button', { name: 'Crop element', exact: true }).click();
+  await page.getByRole('button', { name: 'Use ellipse crop', exact: true }).click();
+  await page.getByRole('button', { name: 'Apply crop', exact: true }).click();
+  expect((await save(page)).pages[0].elements[0].clip?.shape).toBe('ellipse');
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  let pending = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download design', exact: true }).click();
+  await (await pending).saveAs('test-results/oval-crop.png');
+  const sample = async (filename: string, mime = 'image/png') =>
+    page.evaluate(
+      async (data) => {
+        const image = new Image();
+        image.src = data;
+        await image.decode();
+        const canvas = document.createElement('canvas');
+        canvas.width = image.width;
+        canvas.height = image.height;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(image, 0, 0);
+        return [
+          [110, 110],
+          [250, 200],
+        ].map(([x, y]) => [...ctx.getImageData(x, y, 1, 1).data]);
+      },
+      `data:${mime};base64,${(await readFile(filename)).toString('base64')}`,
+    );
+  expect(await sample('test-results/oval-crop.png')).toEqual([
+    [255, 255, 255, 255],
+    [237, 150, 93, 255],
+  ]);
+  await page.getByRole('button', { name: 'Crop element', exact: true }).click();
+  await page.getByRole('button', { name: 'Use heart crop', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit curve points', exact: true }).click();
+  const handle = page.getByRole('button', { name: 'Crop point 1 out handle', exact: true });
+  const box = (await handle.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x - 20, box.y + 30, { steps: 5 });
+  await page.mouse.up();
+  await page.getByRole('button', { name: 'Apply crop', exact: true }).click();
+  expect((await save(page)).pages[0].elements[0].clip?.nodes?.[0].outY).toBeGreaterThan(0.06);
+  await page.getByRole('button', { name: 'Crop element', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit curve points', exact: true }).click();
+  await page.getByRole('button', { name: 'Add point', exact: true }).click();
+  await page.getByRole('button', { name: 'Curve point', exact: true }).click();
+  await page.screenshot({ path: 'test-results/creative-crop.png', fullPage: true });
+  await page.getByRole('button', { name: 'Apply crop', exact: true }).click();
+  let doc = await save(page);
+  expect(doc.pages[0].elements[0].clip?.nodes).toHaveLength(5);
+  const heart = doc.pages[0].elements[0].clip;
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  pending = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download design', exact: true }).click();
+  await (await pending).saveAs('test-results/curve-crop.png');
+  expect(await sample('test-results/curve-crop.png')).toEqual([
+    [255, 255, 255, 255],
+    [237, 150, 93, 255],
+  ]);
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page.getByLabel('File type').selectOption('svg');
+  pending = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download design', exact: true }).click();
+  await (await pending).saveAs('test-results/curve-crop.svg');
+  expect(await sample('test-results/curve-crop.svg', 'image/svg+xml')).toEqual([
+    [255, 255, 255, 255],
+    [237, 150, 93, 255],
+  ]);
+  await page.getByRole('button', { name: 'Crop element', exact: true }).click();
+  await page.getByRole('button', { name: 'Draw freeform', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Apply crop', exact: true })).toBeDisabled();
+  const area = (await page.getByLabel('Crop mask editor', { exact: true }).boundingBox())!;
+  await page.mouse.move(area.x + area.width * 0.15, area.y + area.height * 0.15);
+  await page.mouse.down();
+  await page.mouse.move(area.x + area.width * 0.85, area.y + area.height * 0.15, { steps: 10 });
+  await page.mouse.move(area.x + area.width * 0.5, area.y + area.height * 0.85, { steps: 10 });
+  await page.mouse.up();
+  await page.getByRole('button', { name: 'Smooth all', exact: true }).click();
+  await page.getByRole('button', { name: 'Apply crop', exact: true }).click();
+  doc = await save(page);
+  expect(doc.pages[0].elements[0].clip?.nodes!.length).toBeGreaterThan(5);
+  await page.getByRole('button', { name: 'Undo (Ctrl Z)' }).click();
+  expect((await save(page)).pages[0].elements[0].clip).toEqual(heart);
+  await page.getByRole('button', { name: 'Redo (Ctrl Shift Z)' }).click();
+  const mask = (await save(page)).pages[0].elements[0].clip;
+  await page.reload();
+  await expect(page.locator('.loading-screen')).toBeHidden();
+  expect((await save(page)).pages[0].elements[0].clip).toEqual(mask);
+  expect(errors).toEqual([]);
 });

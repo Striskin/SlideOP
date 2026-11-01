@@ -52,7 +52,25 @@ export function Properties({ onCheck }: { onCheck: () => void }) {
   const [progress, setProgress] = useState<BackgroundProgress>({
     label: 'Preparing the local model…',
   });
-  const update = (props: Partial<Element>) => useEditor.getState().update(selection, props);
+  const update = (props: Partial<Element>) => {
+    // Numeric source-crop controls resize the same normalized mask as the visual dialog.
+    if (
+      element?.kind === 'image' &&
+      element.clip &&
+      !('clip' in props) &&
+      (props.width !== undefined || props.height !== undefined)
+    ) {
+      const rx = (props.width ?? element.width) / element.width;
+      const ry = (props.height ?? element.height) / element.height;
+      const c = element.clip;
+      useEditor
+        .getState()
+        .update(selection, {
+          ...props,
+          clip: { ...c, x: c.x * rx, y: c.y * ry, width: c.width * rx, height: c.height * ry },
+        });
+    } else useEditor.getState().update(selection, props);
+  };
   const removeBackground = async () => {
     if (!element?.assetId) return;
     const documentId = useEditor.getState().document.id;
@@ -504,7 +522,14 @@ export function Properties({ onCheck }: { onCheck: () => void }) {
                   className="text-button"
                   onClick={() => {
                     const a = getAsset(element.assetId!);
-                    if (a) update({ cropX: 0, cropY: 0, width: a.width, height: a.height });
+                    if (a)
+                      update({
+                        cropX: 0,
+                        cropY: 0,
+                        width: a.width,
+                        height: a.height,
+                        clip: undefined,
+                      });
                   }}
                 >
                   Reset crop

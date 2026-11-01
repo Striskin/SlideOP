@@ -17,6 +17,7 @@ import { finishTextEditing, repeatSelection, tidySelection } from '../canvas/com
 import { useEditor } from '../store/editor';
 import { LayoutPreview } from './LayoutPreview';
 import { NumberField } from './ui';
+import { PhotoGridBuilder } from './PhotoGridBuilder';
 
 const sample = `# Ideas into motion
 A small plan for making something meaningful.
@@ -220,6 +221,7 @@ export function BuildPanel() {
         </p>
       )}
       <AutoArrangeTools />
+      <PhotoGridBuilder themeId={themeId} />
     </>
   );
 }

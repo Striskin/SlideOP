@@ -2750,6 +2750,116 @@ kbd {
   right: -4px;
   cursor: se-resize;
 }
+.mask-tools {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.mask-tools .section-heading {
+  margin: 0 0 10px;
+}
+.mask-presets,
+.mask-point-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.mask-presets button,
+.mask-point-tools button {
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.mask-presets button.secondary[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.mask-point-tools label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.mask-point-tools select {
+  width: 60px;
+}
+.mask-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.mask-canvas.editing {
+  pointer-events: auto;
+  touch-action: none;
+  cursor: crosshair;
+}
+.mask-node,
+.curve-handle {
+  cursor: grab;
+  touch-action: none;
+}
+.mask-node:focus,
+.curve-handle:focus {
+  outline: none;
+  stroke: #ff8b3d;
+  stroke-width: 4px;
+}
+.photo-grid-options {
+  padding-top: 20px;
+  margin-top: 20px;
+  border-top: 1px solid var(--border);
+}
+.photo-grid-picker {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 12px 0;
+}
+.photo-grid-picker button {
+  position: relative;
+  aspect-ratio: 1;
+  padding: 0;
+  overflow: hidden;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.photo-grid-picker button[aria-pressed='true'] {
+  border-color: var(--accent);
+}
+.photo-grid-picker img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.photo-grid-picker span {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: var(--accent);
+  color: white;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+}
+.crop-actions {
+  position: sticky;
+  bottom: -26px;
+  z-index: 3;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  padding: 12px 0;
+}
 .recovery-panel {
   border-top: 1px solid var(--border);
   margin-top: 24px;

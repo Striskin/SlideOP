@@ -3,6 +3,7 @@ import {
   StaticCanvas,
   FabricObject,
   Rect,
+  Path,
   Ellipse,
   Triangle,
   Line,
@@ -18,8 +19,9 @@ import {
   FixedLayout,
 } from 'fabric';
 import type { Element, Page } from '../model/document';
-import { makeElement } from '../model/document';
+import { makeElement, uid } from '../model/document';
 import { assetURL } from '../services/assets';
+import { maskPath } from '../model/masks';
 
 export type DesignObject = FabricObject & { elementId?: string; sourceElement?: Element };
 export const objectId = (object: FabricObject) => (object as DesignObject).elementId ?? '';
@@ -154,17 +156,53 @@ export async function toFabric(
       }),
     );
   if (e.clip) {
+    const c = e.clip;
+    const options = {
+      originX: 'left' as const,
+      originY: 'top' as const,
+      left: c.x - object.width / 2,
+      top: c.y - object.height / 2,
+      fill: '#000000',
+      strokeWidth: 0,
+    };
+    let clipPath: FabricObject;
+    if (c.shape === 'ellipse')
+      clipPath = new Ellipse({ ...options, rx: c.width / 2, ry: c.height / 2 });
+    else if (c.shape === 'path' && c.nodes) {
+      const path = new Path(maskPath(c, c.width, c.height), options);
+      // Path bounds can start inside the crop frame; preserve that offset.
+      path.set({
+        left: options.left + path.pathOffset.x - path.width / 2,
+        top: options.top + path.pathOffset.y - path.height / 2,
+        clipPath: new Rect({
+          originX: 'left',
+          originY: 'top',
+          left: -path.pathOffset.x,
+          top: -path.pathOffset.y,
+          width: c.width,
+          height: c.height,
+          fill: '#000000',
+          strokeWidth: 0,
+        }),
+      });
+      // Fabric's clip SVG serializer references nested clips without emitting their definitions.
+      // Keep the rectangular intersection in SVG using only our generated numeric path data.
+      path.toClipPathSVG = (reviver) => {
+        const frameId = `slideop-mask-${uid()}`;
+        const markup = `<defs><clipPath id="${frameId}" clipPathUnits="userSpaceOnUse"><rect x="0" y="0" width="${c.width}" height="${c.height}" /></clipPath></defs><path ${path.getSvgTransform(true, ` translate(${-path.pathOffset.x} ${-path.pathOffset.y})`)} d="${maskPath(c, c.width, c.height)}" fill="black" clip-path="url(#${frameId})" />`;
+        return reviver ? reviver(markup) : markup;
+      };
+      clipPath = path;
+    } else
+      clipPath = new Rect({
+        ...options,
+        width: c.width,
+        height: c.height,
+        rx: c.shape === 'rounded' ? Math.min(c.width, c.height) * (c.roundness ?? 0.2) : 0,
+        ry: c.shape === 'rounded' ? Math.min(c.width, c.height) * (c.roundness ?? 0.2) : 0,
+      });
     object.set({
-      clipPath: new Rect({
-        originX: 'left',
-        originY: 'top',
-        left: e.clip.x - object.width / 2,
-        top: e.clip.y - object.height / 2,
-        width: e.clip.width,
-        height: e.clip.height,
-        fill: '#000000',
-        strokeWidth: 0,
-      }),
+      clipPath,
       perPixelTargetFind: true,
     });
   }

@@ -31,6 +31,78 @@ async function start(page: Page) {
   await expect(page.locator('.loading-screen')).toBeHidden();
 }
 
+test('photo grid builder creates editable masked photos with local fonts, undo and reload', async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await start(page);
+  const png = await page.evaluate(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 600;
+    canvas.height = 400;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#e87936';
+    ctx.fillRect(0, 0, 600, 400);
+    return canvas.toDataURL().split(',')[1];
+  });
+  await page.getByRole('button', { name: 'Uploads', exact: true }).click();
+  const input = page.locator('input[type=file][accept="image/png,image/jpeg,image/webp"]');
+  await input.setInputFiles([
+    { name: 'gallery-one.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') },
+    { name: 'gallery-two.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') },
+  ]);
+  await page.getByRole('button', { name: 'Build', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Include gallery-one.png in gallery', exact: true })
+    .click();
+  await page
+    .getByRole('button', { name: 'Include gallery-two.png in gallery', exact: true })
+    .click();
+  await page.getByLabel('Gallery title', { exact: true }).fill('Our photo story');
+  await page.getByRole('button', { name: 'Build photo grid (2)', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Build photo grid (2)', exact: true }),
+  ).toBeEnabled();
+  let doc = await save(page);
+  expect(doc.pages).toHaveLength(2);
+  expect(doc.pages[1].elements.filter((e) => e.kind === 'image')).toHaveLength(2);
+  expect(doc.pages[1].elements.find((e) => e.kind === 'image')?.clip?.shape).toBe('rounded');
+  await page.getByRole('button', { name: 'Layers', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Rename gallery-one.png', exact: true }).click();
+  await page.getByRole('button', { name: 'Crop image visually', exact: true }).click();
+  await page.getByRole('button', { name: 'Use star crop', exact: true }).click();
+  await page.getByRole('button', { name: 'Apply crop', exact: true }).click();
+  doc = await save(page);
+  expect(doc.pages[1].elements.find((e) => e.name === 'gallery-one.png')?.clip?.nodes).toHaveLength(
+    10,
+  );
+  await page.getByRole('button', { name: 'Undo (Ctrl Z)' }).click();
+  expect(
+    (await save(page)).pages[1].elements.find((e) => e.name === 'gallery-one.png')?.clip?.shape,
+  ).toBe('rounded');
+  await page.getByRole('button', { name: 'Text', exact: true }).click();
+  await page.getByLabel('Find a font', { exact: true }).fill('Outfit');
+  await page.getByRole('button', { name: 'Add Outfit text', exact: true }).click();
+  expect((await save(page)).pages[1].elements.at(-1)?.fontFamily).toBe('Outfit');
+  expect(
+    await page.evaluate(async () => {
+      await Promise.all(
+        ['Outfit', 'Rubik', 'Vollkorn', 'Sacramento'].map((font) =>
+          document.fonts.load(`24px "${font}"`),
+        ),
+      );
+      return ['Outfit', 'Rubik', 'Vollkorn', 'Sacramento'].every((font) =>
+        document.fonts.check(`24px "${font}"`),
+      );
+    }),
+  ).toBe(true);
+  await page.reload();
+  await expect(page.locator('.loading-screen')).toBeHidden();
+  expect((await save(page)).pages).toHaveLength(2);
+  expect(errors).toEqual([]);
+});
+
 test('every generic layout creates an editable page and can be inserted repeatedly', async ({
   page,
 }) => {
@@ -176,13 +248,11 @@ test('a 5,000-object project renders, edits, saves, and undoes without changing 
     return page;
   });
   const started = Date.now();
-  await page
-    .locator('input[type=file][accept=".slideop,.json"]')
-    .setInputFiles({
-      name: 'large.slideop',
-      mimeType: 'application/json',
-      buffer: Buffer.from(JSON.stringify({ document: doc, assets: [] })),
-    });
+  await page.locator('input[type=file][accept=".slideop,.json"]').setInputFiles({
+    name: 'large.slideop',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({ document: doc, assets: [] })),
+  });
   await expect(page.getByText('Project imported. Make it your own.')).toBeVisible();
   await page.getByRole('button', { name: 'Layers', exact: true }).click();
   await page.getByRole('textbox', { name: 'Rename Object 1', exact: true }).click();

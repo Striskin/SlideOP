@@ -1,5 +1,7 @@
 import { Textbox } from 'fabric';
+import { walkElements } from '../model/document';
 import type { Page } from '../model/document';
+import { getAsset } from './assets';
 import { useEditor } from '../store/editor';
 import { finishTextEditing } from '../canvas/commands';
 
@@ -55,6 +57,12 @@ export async function insertBuiltPages(pages: Page[]) {
     throw new Error('The open project changed. Build again in the current project.');
   if (s.document.pages.length + pages.length > 100)
     throw new Error('A project can contain up to 100 pages.');
+  if (
+    pages.some((p) =>
+      walkElements(p.elements).some((e) => e.kind === 'image' && !getAsset(e.assetId!)),
+    )
+  )
+    throw new Error('A selected upload was removed. Choose images again.');
   s.commit((doc) => {
     doc.pages.push(...pages);
   }, pages[0].id);

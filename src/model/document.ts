@@ -63,7 +63,34 @@ const base = z.object({
       y: finite.min(0).max(20000),
       width: finite.positive().max(20000),
       height: finite.positive().max(20000),
+      shape: z.enum(['rect', 'ellipse', 'rounded', 'path']).optional(),
+      roundness: finite.min(0).max(0.5).optional(),
+      nodes: z
+        .array(
+          z
+            .object({
+              x: finite.min(0).max(1),
+              y: finite.min(0).max(1),
+              inX: finite.min(-2).max(3).optional(),
+              inY: finite.min(-2).max(3).optional(),
+              outX: finite.min(-2).max(3).optional(),
+              outY: finite.min(-2).max(3).optional(),
+            })
+            .refine(
+              (node) =>
+                (node.inX === undefined) === (node.inY === undefined) &&
+                (node.outX === undefined) === (node.outY === undefined),
+              'Curve handles need both coordinates.',
+            ),
+        )
+        .min(3)
+        .max(64)
+        .optional(),
     })
+    .refine(
+      (clip) => clip.shape !== 'path' || !!clip.nodes,
+      'A path mask needs at least three points.',
+    )
     .optional(),
   points: z.array(point).min(3).max(50).optional(),
   styleId: z.string().max(100).optional(),

@@ -12,7 +12,7 @@ describe('expanded editor catalogs', () => {
     ];
     expect(validateDocument(JSON.parse(JSON.stringify(doc)))).toEqual(doc);
     expect(shapePresets).toHaveLength(24);
-    expect(fontNames).toHaveLength(26);
+    expect(fontNames).toHaveLength(30);
   });
   it('bounds custom polygons and produces evenly spaced vertices', () => {
     expect(regularPolygon(2)).toHaveLength(3);

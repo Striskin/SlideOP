@@ -11,6 +11,7 @@ SlideOP includes open-source dependencies. Their licenses remain available in th
 | Lucide icons                                                                                                                                    | ISC                                                    |
 | DM Sans, Inter, Manrope, Montserrat, Poppins, Space Grotesk, Playfair Display, Lora, Fraunces, Bebas Neue, Oswald, IBM Plex Mono via Fontsource | SIL Open Font License 1.1; see each package's LICENSE  |
 | Nunito Sans, Raleway, Cormorant Garamond, Libre Baskerville, Anton, Caveat, Pacifico, JetBrains Mono via Fontsource                             | SIL Open Font License 1.1; see each package's LICENSE  |
+| Outfit, Rubik, Vollkorn, Sacramento via Fontsource | SIL Open Font License 1.1; see each package's LICENSE |
 | `@imgly/background-removal`                                                                                                                     | AGPL-3.0                                               |
 | ISNET model used by background removal                                                                                                          | MIT, per the library's `ThirdPartyLicenses.json`       |
 | ONNX Runtime                                                                                                                                    | MIT                                                    |
